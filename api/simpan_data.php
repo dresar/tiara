@@ -76,15 +76,20 @@ if (
             $newRow = $stmtLast->fetch(PDO::FETCH_ASSOC);
             
             if ($newRow) {
-                // Panggil Node.js websocket server secara internal
-                $ch = curl_init('http://localhost:8080/broadcast');
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($newRow));
-                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 1); // Timeout singkat agar insert DB tidak terhambat jika nodejs mati
-                curl_exec($ch);
-                curl_close($ch);
+                // Panggil Node.js websocket server secara internal (Opsional, hanya jika Node.js berjalan)
+                // Di cPanel shared hosting, fitur ini TIDAK akan aktif (dan itu normal).
+                // Dashboard tetap berjalan via HTTP Polling otomatis tiap 5 detik.
+                if (function_exists('curl_init') && getenv('WS_ENABLED') !== 'false') {
+                    $ch = curl_init('http://localhost:8080/broadcast');
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($newRow));
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 1);
+                    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+                    @curl_exec($ch); // @ = suppress error jika Node.js tidak ada
+                    curl_close($ch);
+                }
             }
 
             // Jika berhasil
