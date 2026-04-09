@@ -1,8 +1,0 @@
-.env
-.env.cpanel
-node_modules
-vendor
-*.sql
-migrate.php
-.git
-revisi tiara.pdf
