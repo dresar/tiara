@@ -11,17 +11,21 @@ const REFRESH_INTERVAL = 5000; // 5 detik
 // Variabel untuk menyimpan instance Chart.js
 let chartKadarAir = null;
 let chartSuhuKelembaban = null;
+let lastSeenId = null; // Menyimpan ID data terakhir
 
 // Event ketika DOM selesai dimuat
 document.addEventListener('DOMContentLoaded', () => {
     // Inisialisasi Chart kosong terlebih dahulu
     initCharts();
     
-    // Tarik data pertama kali
+    // Tarik data pertama kali penuh beserta riwayat
     fetchData();
     
-    // Set interval untuk auto-refresh setiap 5 detik
-    setInterval(fetchData, REFRESH_INTERVAL);
+    // Polling HTTP tiap REFRESH_INTERVAL karena websocket mungkin tidak dijalankan
+    setInterval(fetchLatestData, REFRESH_INTERVAL);
+    
+    // Hubungkan ke WebSocket untuk Update Real-time (opsional jika server Node ada)
+    initWebSocket();
 
     // Sidebar Toggle Logic
     const toggleButton = document.getElementById('menu-toggle');
@@ -77,7 +81,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainDashboardContent = document.getElementById('mainDashboardContent');
     const docsContent = document.getElementById('docsContent');
     const historyContent = document.getElementById('historyContent');
-    const testDeviceContent = document.getElementById('testDeviceContent');
     const dummyContent = document.getElementById('dummyContent');
     const dummyTitle = document.getElementById('dummyTitle');
 
@@ -101,7 +104,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if(mainDashboardContent) mainDashboardContent.style.display = 'none';
             if(docsContent) docsContent.style.display = 'none';
             if(historyContent) historyContent.style.display = 'none';
-            if(testDeviceContent) testDeviceContent.style.display = 'none';
             if(dummyContent) dummyContent.style.display = 'none';
 
             // Logika pergantian tampilan (SPA) tanpa loading
@@ -117,8 +119,6 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if(menuName === "Riwayat Data") {
                 if(historyContent) historyContent.style.display = 'block';
                 fetchAllData(); // Tarik data terbaru saat membuka halaman ini
-            } else if(menuName === "Tes Koneksi Perangkat") {
-                if(testDeviceContent) testDeviceContent.style.display = 'block';
             } else {
                 if(dummyContent) dummyContent.style.display = 'block';
                 if(dummyTitle) dummyTitle.innerText = "Halaman " + menuName;
@@ -132,59 +132,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Logika Form Simulasi ESP32
-    const formSimulasi = document.getElementById('formSimulasi');
-    if (formSimulasi) {
-        formSimulasi.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const btnSubmit = document.getElementById('btnKirimSimulasi');
-            const simulasiResponse = document.getElementById('simulasiResponse');
-            const simulasiLog = document.getElementById('simulasiLog');
-            
-            // Ubah tombol jadi loading
-            btnSubmit.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Mengirim...';
-            btnSubmit.disabled = true;
-            
-            // Siapkan Payload JSON
-            const payload = {
-                adc: parseInt(document.getElementById('simAdc').value),
-                kadar_air: parseFloat(document.getElementById('simKadar').value),
-                suhu: parseFloat(document.getElementById('simSuhu').value),
-                kelembaban: parseFloat(document.getElementById('simKelembaban').value),
-                status: document.getElementById('simStatus').value
-            };
-            
-            // Kirim ke API simpan_data.php menggunakan POST
-            fetch(API_BASE_URL + 'simpan_data.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Tampilkan Response
-                simulasiResponse.style.display = 'block';
-                simulasiLog.innerText = JSON.stringify(data, null, 2);
-                
-                // Kembalikan tombol
-                btnSubmit.innerHTML = '<i class="bi bi-send-fill me-2"></i>Kirim Data Sekarang';
-                btnSubmit.disabled = false;
-                
-                // Trigger refresh data dashboard
-                fetchData();
-            })
-            .catch(error => {
-                simulasiResponse.style.display = 'block';
-                simulasiLog.innerText = "ERROR KONEKSI: \n" + error.message;
-                
-                btnSubmit.innerHTML = '<i class="bi bi-send-fill me-2"></i>Kirim Data Sekarang';
-                btnSubmit.disabled = false;
-            });
-        });
-    }
 });
 
 /**
@@ -209,15 +156,34 @@ function fetchLatestData() {
                 updateCards(res.data);
                 checkAlert(res.data.status_mutu);
                 
+                // Cek status ESP32 (Online/Offline) via server_time beda
+                checkEspStatus(res.data.waktu, res.server_time);
+                
                 // Update waktu terakhir diperbarui
                 const lastUpdateEl = document.getElementById('lastUpdate');
                 if(lastUpdateEl) {
-                    lastUpdateEl.innerText = "Terakhir diperbarui: " + res.data.waktu;
+                    lastUpdateEl.innerText = "Terakhir diperbarui: " + formatWaktuIndo(res.data.waktu);
                 }
+
+                // Tambahkan data ke Grafik/Tabel jika ada data baru masuk
+                if (lastSeenId !== null && res.data.id !== lastSeenId) {
+                    appendChartData(res.data);
+                    prependTableHistory(res.data);
+                }
+                lastSeenId = res.data.id;
             }
         })
         .catch(error => {
             console.error('Error fetching latest data:', error);
+            // Paksa set Offline jika error ambil API
+            const badge = document.getElementById('connectionBadge');
+            const icon = document.getElementById('connectionIcon');
+            const text = document.getElementById('connectionText');
+            if (badge && icon && text) {
+                badge.className = 'badge bg-secondary px-3 py-2 rounded-pill me-3 d-none d-md-inline';
+                icon.className = 'bi bi-circle-fill me-1 text-danger';
+                text.innerText = 'ESP32 Offline';
+            }
         });
 }
 
@@ -273,7 +239,7 @@ function updateHistoryTable(dataArray) {
         
         html += `
             <tr>
-                <td><i class="bi bi-clock me-2 text-muted"></i>${item.waktu}</td>
+                <td><i class="bi bi-clock me-2 text-muted"></i>${formatWaktuIndo(item.waktu)}</td>
                 <td class="fw-bold">${item.nilai_adc}</td>
                 <td>${parseFloat(item.kadar_air).toFixed(1)}%</td>
                 <td>${parseFloat(item.suhu).toFixed(1)}°C</td>
@@ -451,10 +417,7 @@ function updateCharts(dataArray) {
     // Parsing data array (diurutkan ASC dari backend)
     dataArray.forEach(item => {
         // Format waktu untuk label (HH:MM:SS)
-        const dateObj = new Date(item.waktu);
-        const timeStr = dateObj.getHours().toString().padStart(2, '0') + ':' + 
-                        dateObj.getMinutes().toString().padStart(2, '0') + ':' + 
-                        dateObj.getSeconds().toString().padStart(2, '0');
+        const timeStr = formatJamSekarang(item.waktu);
         
         labels.push(timeStr);
         dataKadar.push(parseFloat(item.kadar_air));
@@ -472,4 +435,204 @@ function updateCharts(dataArray) {
     chartSuhuKelembaban.data.datasets[0].data = dataSuhu;
     chartSuhuKelembaban.data.datasets[1].data = dataKelembaban;
     chartSuhuKelembaban.update();
+}
+
+/**
+ * Insialisasi Klien WebSocket untuk Real-Time
+ */
+function initWebSocket() {
+    // Terhubung ke Port 8080 dimana ws_server.js berjalan
+    const wsUrl = 'ws://' + window.location.hostname + ':8080';
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+        console.log('✅ Terhubung ke WebSocket Server untuk Update Real-Time!');
+        // Sembunyikan pesan error jika sebelumnya terputus
+        const alertBanner = document.getElementById('alertBanner');
+        if (alertBanner && alertBanner.innerHTML.includes('WebSocket')) {
+            alertBanner.style.display = 'none';
+        }
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const rowData = JSON.parse(event.data);
+            console.log("🔥 DATA BARU (Real-time):", rowData);
+
+            // Update Cards & Peringatan langsung
+            updateCards(rowData);
+            checkAlert(rowData.status_mutu);
+            
+            // Update Text Waktu
+            const lastUpdateEl = document.getElementById('lastUpdate');
+            if (lastUpdateEl) {
+                lastUpdateEl.innerText = "Terakhir diperbarui: " + formatWaktuIndo(rowData.waktu);
+            }
+
+            // Tambahkan data ke Grafik (tanpa harus memuat ulang semua data)
+            appendChartData(rowData);
+
+            // Tambahkan data ke Tabel Riwayat
+            prependTableHistory(rowData);
+
+        } catch (error) {
+            console.error('Error memproses data WebSocket:', error);
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error('❌ WebSocket Error.', error);
+    };
+
+    ws.onclose = () => {
+        console.warn('⚠️ WebSocket Terputus! Mencoba menghubungkan kembali dalam 3 detik...');
+        setTimeout(initWebSocket, 3000);
+    };
+}
+
+/**
+ * Menambah Data Baru ke Ujung Grafik secara Instan
+ */
+function appendChartData(item) {
+    if(!chartKadarAir || !chartSuhuKelembaban) return;
+
+    const timeStr = formatJamSekarang(item.waktu);
+
+    // Chart Kadar Air
+    chartKadarAir.data.labels.push(timeStr);
+    chartKadarAir.data.datasets[0].data.push(parseFloat(item.kadar_air));
+    
+    // Chart Suhu & Kelembaban
+    chartSuhuKelembaban.data.labels.push(timeStr);
+    chartSuhuKelembaban.data.datasets[0].data.push(parseFloat(item.suhu));
+    chartSuhuKelembaban.data.datasets[1].data.push(parseFloat(item.kelembaban));
+
+    // Batasi maksimum titik di grafik (misal 50) agar tidak lag/memory leak
+    const MAX_POINTS = 50;
+    if (chartKadarAir.data.labels.length > MAX_POINTS) {
+        chartKadarAir.data.labels.shift();
+        chartKadarAir.data.datasets[0].data.shift();
+        
+        chartSuhuKelembaban.data.labels.shift();
+        chartSuhuKelembaban.data.datasets[0].data.shift();
+        chartSuhuKelembaban.data.datasets[1].data.shift();
+    }
+
+    // Hanya update animasinya untuk titik baru
+    chartKadarAir.update();
+    chartSuhuKelembaban.update();
+}
+
+/**
+ * Memasukkan Data Teratas di Tabel Riwayat
+ */
+function prependTableHistory(item) {
+    const tableBody = document.getElementById('tableHistoryBody');
+    if(!tableBody) return;
+
+    // Bersihkan text "Belum ada data" / "Memuat data" jika ada
+    if (tableBody.children.length === 1 && tableBody.children[0].innerText.includes('Memuat')) {
+        tableBody.innerHTML = '';
+    }
+
+    let badgeClass = 'bg-success';
+    let statusText = item.status_mutu.toUpperCase();
+    
+    if(statusText === 'WASPADA') badgeClass = 'bg-warning text-dark';
+    if(statusText === 'BAHAYA') badgeClass = 'bg-danger';
+    
+    const tr = document.createElement('tr');
+    tr.classList.add('table-primary'); // Highlight data baru sesaat
+    setTimeout(() => tr.classList.remove('table-primary'), 2000); // hilangkan highlight
+
+    tr.innerHTML = `
+        <td><i class="bi bi-clock me-2 text-muted"></i>${formatWaktuIndo(item.waktu)}</td>
+        <td class="fw-bold">${item.nilai_adc}</td>
+        <td>${parseFloat(item.kadar_air).toFixed(1)}%</td>
+        <td>${parseFloat(item.suhu).toFixed(1)}°C</td>
+        <td>${parseFloat(item.kelembaban).toFixed(1)}%</td>
+        <td><span class="badge ${badgeClass}">${statusText}</span></td>
+    `;
+    
+    // Masukkan ke paling atas
+    tableBody.prepend(tr);
+}
+
+/**
+ * Mengecek Koneksi ESP32 berdasarkan selisih waktu database dan server backend (PHP)
+ */
+function checkEspStatus(waktuStr, serverTimeStr) {
+    const badge = document.getElementById('connectionBadge');
+    const icon = document.getElementById('connectionIcon');
+    const text = document.getElementById('connectionText');
+
+    if (!badge || !icon || !text || !waktuStr || !serverTimeStr) return;
+
+    const parseDbTime = (str) => {
+        const clean = str.split('.')[0];
+        return new Date(clean.replace(/-/g, '/')).getTime();
+    };
+
+    const espTime = parseDbTime(waktuStr);
+    const serverTime = parseDbTime(serverTimeStr);
+    
+    // Dapatkan beda waktu (dalam detik)
+    const diffSeconds = (serverTime - espTime) / 1000;
+
+    // ESP mengirim per 5 detik, jadi batas toleransi d kasih max 15 detik
+    if (diffSeconds >= 0 && diffSeconds <= 15) {
+        badge.className = 'badge bg-primary px-3 py-2 rounded-pill me-3 d-none d-md-inline';
+        icon.className = 'bi bi-circle-fill me-1 text-success';
+        text.innerText = 'ESP32 Online';
+    } else {
+        badge.className = 'badge bg-secondary px-3 py-2 rounded-pill me-3 d-none d-md-inline';
+        icon.className = 'bi bi-circle-fill me-1 text-danger';
+        text.innerText = 'ESP32 Offline';
+    }
+}
+
+/**
+ * Format Waktu ke Format Indonesia (dd Bulan yyyy, HH:mm:ss WIB)
+ */
+function formatWaktuIndo(waktuStr) {
+    if (!waktuStr) return '-';
+    // Hilangkan microsecond untuk parsing yang lebih aman
+    const cleanWaktu = waktuStr.split('.')[0];
+    // Reformat string untuk parsing yang lebih luas didukung (mengubah - menjadi /)
+    const safeWaktu = cleanWaktu.replace(/-/g, '/');
+    const dateObj = new Date(safeWaktu);
+
+    if (isNaN(dateObj.getTime())) return waktuStr; // Fallback jika gagal parse
+
+    const bulanIndo = [
+        'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+
+    const hari = dateObj.getDate().toString().padStart(2, '0');
+    const bulan = bulanIndo[dateObj.getMonth()];
+    const tahun = dateObj.getFullYear();
+    const jam = dateObj.getHours().toString().padStart(2, '0');
+    const menit = dateObj.getMinutes().toString().padStart(2, '0');
+    const detik = dateObj.getSeconds().toString().padStart(2, '0');
+
+    return `${hari} ${bulan} ${tahun}, ${jam}:${menit}:${detik} WIB`;
+}
+
+/**
+ * Mendapatkan Jam:Menit:Detik dari Waktu agar aman di parsing semua browser
+ */
+function formatJamSekarang(waktuStr) {
+    if (!waktuStr) return '-';
+    const cleanWaktu = waktuStr.split('.')[0];
+    const safeWaktu = cleanWaktu.replace(/-/g, '/');
+    const dateObj = new Date(safeWaktu);
+    
+    if (isNaN(dateObj.getTime())) return waktuStr;
+
+    const jam = dateObj.getHours().toString().padStart(2, '0');
+    const menit = dateObj.getMinutes().toString().padStart(2, '0');
+    const detik = dateObj.getSeconds().toString().padStart(2, '0');
+
+    return `${jam}:${menit}:${detik}`;
 }

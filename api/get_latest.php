@@ -28,7 +28,7 @@ try {
     if ($row) {
         // Jika data ditemukan
         http_response_code(200); // 200 OK
-        echo json_encode(["status" => true, "data" => $row]);
+        echo json_encode(["status" => true, "data" => $row, "server_time" => date('Y-m-d H:i:s')]);
     } else {
         // Jika data kosong
         http_response_code(404); // 404 Not Found

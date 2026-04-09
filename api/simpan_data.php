@@ -66,6 +66,27 @@ if (
         
         // Eksekusi statement
         if ($stmt->execute()) {
+            // Ambil ID yang baru dimasukkan
+            $insertedId = $pdo->lastInsertId();
+            
+            // Ambil data utuh yang barusan masuk (termasuk generate CURRENT_TIMESTAMP nya)
+            $stmtLast = $pdo->prepare("SELECT * FROM tb_monitoring WHERE id = :id");
+            $stmtLast->bindParam(':id', $insertedId, PDO::PARAM_INT);
+            $stmtLast->execute();
+            $newRow = $stmtLast->fetch(PDO::FETCH_ASSOC);
+            
+            if ($newRow) {
+                // Panggil Node.js websocket server secara internal
+                $ch = curl_init('http://localhost:8080/broadcast');
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($newRow));
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 1); // Timeout singkat agar insert DB tidak terhambat jika nodejs mati
+                curl_exec($ch);
+                curl_close($ch);
+            }
+
             // Jika berhasil
             http_response_code(201); // 201 Created
             echo json_encode(["status" => true, "message" => "Data berhasil disimpan."]);
