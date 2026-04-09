@@ -3,13 +3,7 @@
         "api/*.php": {
             "runtime": "vercel-php@0.8.0"
         },
-        "api/index.php": {
-            "runtime": "vercel-php@0.8.0"
-        },
         "index.php": {
-            "runtime": "vercel-php@0.8.0"
-        },
-        "koneksi.php": {
             "runtime": "vercel-php@0.8.0"
         }
     },
