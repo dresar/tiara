@@ -41,10 +41,10 @@ if (
     $suhu = (float)$data->suhu;
     $kelembaban = (float)$data->kelembaban;
     $status = strtoupper(trim((string)$data->status));
-    $allowedStatus = ['AMAN', 'WASPADA', 'BAHAYA'];
+    $allowedStatus = ['S.KERING', 'KERING', 'AMAN', 'WASPADA', 'BAHAYA', 'SANGAT KERING'];
     if (!in_array($status, $allowedStatus, true)) {
         http_response_code(400);
-        echo json_encode(["status" => false, "message" => "Status tidak valid. Gunakan: AMAN / WASPADA / BAHAYA."]);
+        echo json_encode(["status" => false, "message" => "Status tidak valid: " . $status]);
         exit;
     }
 
@@ -76,15 +76,7 @@ if (
             $newRow = $stmtLast->fetch(PDO::FETCH_ASSOC);
             
             if ($newRow) {
-                // Panggil Node.js websocket server secara internal
-                $ch = curl_init('http://localhost:8080/broadcast');
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($newRow));
-                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 1); // Timeout singkat agar insert DB tidak terhambat jika nodejs mati
-                curl_exec($ch);
-                curl_close($ch);
+                // Notifikasi ke sistem lain bisa ditambahkan di sini jika perlu
             }
 
             // Jika berhasil

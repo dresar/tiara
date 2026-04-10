@@ -1,3 +1,9 @@
+<?php
+require_once 'auth.php';
+check_login();
+$role = $_SESSION['role'] ?? 'petani';
+$nama = $_SESSION['nama_lengkap'] ?? 'User';
+?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -33,9 +39,11 @@
                     <i class="bi bi-bar-chart-line me-2"></i> Riwayat Data
                 </a>
 
+                <?php if (has_role('admin')): ?>
                 <a href="#" class="list-group-item list-group-item-action sidebar-item">
                     <i class="bi bi-router me-2"></i> Koneksi & Dokumentasi
                 </a>
+                <?php endif; ?>
             </div>
         </div>
         <!-- /#sidebar-wrapper -->
@@ -55,7 +63,18 @@
                     <span class="badge bg-secondary px-3 py-2 rounded-pill me-3 d-none d-md-inline" id="connectionBadge">
                         <i class="bi bi-circle-fill me-1 text-danger" style="font-size: 0.5rem; vertical-align: middle;" id="connectionIcon"></i> <span id="connectionText">ESP32 Offline</span>
                     </span>
-                    <div class="text-muted d-none d-md-block" style="font-size: 0.8rem;" id="lastUpdate">Loading data...</div>
+                    <div class="text-muted d-none d-md-block me-4" style="font-size: 0.8rem;" id="lastUpdate">Loading data...</div>
+                    <div class="dropdown">
+                        <button class="btn btn-light dropdown-toggle bg-transparent border-0" type="button" id="dropdownMenuButton1" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person-circle fs-5 text-primary align-middle me-1"></i> 
+                            <span class="fw-bold fs-6 align-middle"><?= htmlspecialchars($nama) ?></span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" aria-labelledby="dropdownMenuButton1">
+                            <li><h6 class="dropdown-header">Role: <span class="badge bg-primary text-uppercase"><?= htmlspecialchars($role) ?></span></h6></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger fw-bold" href="logout.php"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
+                        </ul>
+                    </div>
                 </div>
             </nav>
 
@@ -163,6 +182,7 @@
                 <!-- End of mainDashboardContent -->
 
                 <!-- Halaman Dokumentasi ESP32 -->
+                <?php if (has_role('admin')): ?>
                 <div id="docsContent" style="display: none;">
                     <div class="card border-0 shadow-sm rounded-4 p-4 mb-4">
                         <h3 class="fw-bold mb-2 text-primary"><i class="bi bi-mortarboard me-2"></i>Tentang Sistem</h3>
@@ -643,6 +663,7 @@ void loop() {
                         </div>
                     </div>
                 </div>
+                <?php endif; ?>
 
 
 

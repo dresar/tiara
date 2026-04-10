@@ -10,7 +10,8 @@ require_once '../koneksi.php';
 
 try {
     // Query untuk mengambil satu data paling terakhir/terbaru
-    $query = "SELECT id, nilai_adc, kadar_air, suhu, kelembaban, status_mutu, waktu 
+    $query = "SELECT id, nilai_adc, kadar_air, suhu, kelembaban, status_mutu, waktu, 
+                     EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - waktu)) AS diff_seconds
               FROM tb_monitoring 
               ORDER BY id DESC 
               LIMIT 1";

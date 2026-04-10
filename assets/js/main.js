@@ -6,7 +6,7 @@
 // Konfigurasi Endpoint API
 // Kita kembali ke relative path paling aman karena built-in server PHP terkadang gagal membaca basePath origin yang benar
 const API_BASE_URL = 'api/';
-const REFRESH_INTERVAL = 5000; // 5 detik
+const REFRESH_INTERVAL = 2000; // 2 detik (Lebih cepat tanpa WebSocket)
 
 // Variabel untuk menyimpan instance Chart.js
 let chartKadarAir = null;
@@ -21,11 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tarik data pertama kali penuh beserta riwayat
     fetchData();
     
-    // Polling HTTP tiap REFRESH_INTERVAL karena websocket mungkin tidak dijalankan
+    // Polling HTTP tiap REFRESH_INTERVAL untuk update data dari server PHP
     setInterval(fetchLatestData, REFRESH_INTERVAL);
-    
-    // Hubungkan ke WebSocket untuk Update Real-time (opsional jika server Node ada)
-    initWebSocket();
 
     // Sidebar Toggle Logic
     const toggleButton = document.getElementById('menu-toggle');
@@ -156,8 +153,8 @@ function fetchLatestData() {
                 updateCards(res.data);
                 checkAlert(res.data.status_mutu);
                 
-                // Cek status ESP32 (Online/Offline) via server_time beda
-                checkEspStatus(res.data.waktu, res.server_time);
+                // Cek status ESP32 (Online/Offline) menggunakan diff_seconds langsung dari database
+                checkEspStatus(parseFloat(res.data.diff_seconds));
                 
                 // Update waktu terakhir diperbarui
                 const lastUpdateEl = document.getElementById('lastUpdate');
@@ -437,58 +434,6 @@ function updateCharts(dataArray) {
     chartSuhuKelembaban.update();
 }
 
-/**
- * Insialisasi Klien WebSocket untuk Real-Time
- */
-function initWebSocket() {
-    // Terhubung ke Port 8080 dimana ws_server.js berjalan
-    const wsUrl = 'ws://' + window.location.hostname + ':8080';
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-        console.log('✅ Terhubung ke WebSocket Server untuk Update Real-Time!');
-        // Sembunyikan pesan error jika sebelumnya terputus
-        const alertBanner = document.getElementById('alertBanner');
-        if (alertBanner && alertBanner.innerHTML.includes('WebSocket')) {
-            alertBanner.style.display = 'none';
-        }
-    };
-
-    ws.onmessage = (event) => {
-        try {
-            const rowData = JSON.parse(event.data);
-            console.log("🔥 DATA BARU (Real-time):", rowData);
-
-            // Update Cards & Peringatan langsung
-            updateCards(rowData);
-            checkAlert(rowData.status_mutu);
-            
-            // Update Text Waktu
-            const lastUpdateEl = document.getElementById('lastUpdate');
-            if (lastUpdateEl) {
-                lastUpdateEl.innerText = "Terakhir diperbarui: " + formatWaktuIndo(rowData.waktu);
-            }
-
-            // Tambahkan data ke Grafik (tanpa harus memuat ulang semua data)
-            appendChartData(rowData);
-
-            // Tambahkan data ke Tabel Riwayat
-            prependTableHistory(rowData);
-
-        } catch (error) {
-            console.error('Error memproses data WebSocket:', error);
-        }
-    };
-
-    ws.onerror = (error) => {
-        console.error('❌ WebSocket Error.', error);
-    };
-
-    ws.onclose = () => {
-        console.warn('⚠️ WebSocket Terputus! Mencoba menghubungkan kembali dalam 3 detik...');
-        setTimeout(initWebSocket, 3000);
-    };
-}
 
 /**
  * Menambah Data Baru ke Ujung Grafik secara Instan
@@ -561,23 +506,12 @@ function prependTableHistory(item) {
 /**
  * Mengecek Koneksi ESP32 berdasarkan selisih waktu database dan server backend (PHP)
  */
-function checkEspStatus(waktuStr, serverTimeStr) {
+function checkEspStatus(diffSeconds) {
     const badge = document.getElementById('connectionBadge');
     const icon = document.getElementById('connectionIcon');
     const text = document.getElementById('connectionText');
 
-    if (!badge || !icon || !text || !waktuStr || !serverTimeStr) return;
-
-    const parseDbTime = (str) => {
-        const clean = str.split('.')[0];
-        return new Date(clean.replace(/-/g, '/')).getTime();
-    };
-
-    const espTime = parseDbTime(waktuStr);
-    const serverTime = parseDbTime(serverTimeStr);
-    
-    // Dapatkan beda waktu (dalam detik)
-    const diffSeconds = (serverTime - espTime) / 1000;
+    if (!badge || !icon || !text || diffSeconds === undefined) return;
 
     // ESP mengirim per 5 detik, jadi batas toleransi d kasih max 15 detik
     if (diffSeconds >= 0 && diffSeconds <= 15) {
